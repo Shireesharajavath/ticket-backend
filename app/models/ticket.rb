@@ -1,3 +1,4 @@
+# app/models/ticket.rb
 class Ticket < ApplicationRecord
   STATUSES = ["Pending", "In Progress", "Ready", "Done"].freeze
 
@@ -11,6 +12,40 @@ class Ticket < ApplicationRecord
   before_validation :set_default_status, on: :create
   before_update :apply_business_rules
 
+  # ------------------------------
+  # 🔍 SEARCH METHOD (for Retool)
+  # ------------------------------
+  def self.search_any(term)
+    # If no term is provided, return all tickets
+    return all if term.blank?
+
+    t = term.strip
+    numeric = t.match?(/\A\d+\z/) # true if purely a number
+
+    # conditions array to build dynamic SQL
+    conditions = []
+    params = {}
+
+    # Text-based search (case-insensitive for MySQL)
+    conditions << "LOWER(title) LIKE :q"
+    conditions << "LOWER(description) LIKE :q"
+    conditions << "LOWER(status) LIKE :q"
+    params[:q] = "%#{t.downcase}%"
+
+    # If numeric, also match by IDs
+    if numeric
+      conditions << "id = :num"
+      conditions << "creator_id = :num"
+      conditions << "assignee_id = :num"
+      params[:num] = t.to_i
+    end
+
+    where(conditions.join(" OR "), params)
+  end
+
+  # ------------------------------
+  # Default status setup
+  # ------------------------------
   def set_default_status
     self.status ||= "Pending"
     self.read_only = false if read_only.nil?
@@ -18,15 +53,17 @@ class Ticket < ApplicationRecord
 
   private
 
-  # business rule enforcement
+  # ------------------------------
+  # Business rules on update
+  # ------------------------------
   def apply_business_rules
-    # once Done -> read_only true
+    # When status becomes Done → ticket locked (read_only true)
     if status_changed? && status == "Done"
       self.read_only = true
       log_system_comment("Status changed to Done — ticket is now read-only")
     end
 
-    # When set to Ready -> auto assign back to creator
+    # When status becomes Ready → auto-assign back to creator
     if status_changed? && status == "Ready"
       self.assignee = creator
       log_system_comment("Status changed to Ready — auto-assigned to creator")
@@ -35,6 +72,6 @@ class Ticket < ApplicationRecord
 
   def log_system_comment(text)
     comments.build(user: creator, body: text, system_generated: true)
-    # We'll save comment when ticket is saved because it's built on transaction
+    # Comment will be saved automatically along with the ticket
   end
 end

@@ -1,3 +1,4 @@
+# app/controllers/tickets_controller.rb
 class TicketsController < ApplicationController
   before_action :authenticate_request!, except: [:index, :show]
   before_action :set_ticket, only: [:show, :update, :destroy]
@@ -7,16 +8,21 @@ class TicketsController < ApplicationController
   # ===========================
   def index
     scope = Ticket.all.includes(:creator, :assignee)
+
+    # ✅ Filter by creator / assignee / status
     scope = scope.where(creator_id: params[:creator_id]) if params[:creator_id].present?
     scope = scope.where(assignee_id: params[:assignee_id]) if params[:assignee_id].present?
     scope = scope.where(status: params[:status]) if params[:status].present?
 
-    if params[:q].present?
-      q = "%#{params[:q]}%"
-      scope = scope.where("title ILIKE ? OR id::text ILIKE ?", q, q)
+    # ✅ Handle text search (title, description, status, id, etc.)
+    if params[:search].present? || params[:q].present?
+      term = params[:search] || params[:q]
+      scope = Ticket.search_any(term)
     end
 
-    render json: scope.order(updated_at: :desc).as_json(
+    tickets = scope.order(updated_at: :desc)
+
+    render json: tickets.as_json(
       include: {
         creator: { only: [:id, :username] },
         assignee: { only: [:id, :username] }
@@ -98,20 +104,43 @@ class TicketsController < ApplicationController
   end
 
   # ===========================
-  # GET /my/created
-  # ===========================
-  def created_by_me
-    tickets = Ticket.where(creator_id: current_user.id)
-    render json: tickets.as_json(include: { assignee: { only: [:id, :username] } })
+# GET /my/created
+# ===========================
+def created_by_me
+  tickets = Ticket.where(creator_id: current_user.id).includes(:assignee)
+
+  # 🔍 Optional search term filter
+  if params[:q].present?
+    query = "%#{params[:q]}%"
+    tickets = tickets.where("title ILIKE ? OR description ILIKE ? OR id::text ILIKE ? OR status ILIKE ?", query, query, query, query)
   end
 
-  # ===========================
-  # GET /my/assigned
-  # ===========================
-  def assigned_to_me
-    tickets = Ticket.where(assignee_id: current_user.id)
-    render json: tickets.as_json(include: { creator: { only: [:id, :username] } })
+  # ✅ Optional status filter
+  tickets = tickets.where(status: params[:status]) if params[:status].present?
+
+  render json: tickets.order(updated_at: :desc).as_json(
+    include: { assignee: { only: [:id, :username] } }
+  )
+end
+
+# ===========================
+# GET /my/assigned
+# ===========================
+def assigned_to_me
+  tickets = Ticket.where(assignee_id: current_user.id).includes(:creator)
+
+  if params[:q].present?
+    query = "%#{params[:q]}%"
+    tickets = tickets.where("title ILIKE ? OR description ILIKE ? OR id::text ILIKE ? OR status ILIKE ?", query, query, query, query)
   end
+
+  tickets = tickets.where(status: params[:status]) if params[:status].present?
+
+  render json: tickets.order(updated_at: :desc).as_json(
+    include: { creator: { only: [:id, :username] } }
+  )
+end
+
 
   private
 
