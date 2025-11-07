@@ -1,9 +1,8 @@
 class Comment < ApplicationRecord
+  # Associations
   belongs_to :ticket
   belongs_to :user
 
-  # Marks system comments (e.g., "Status changed to Done")
-  attribute :system_generated, :boolean, default: false
-
+  # Validations
   validates :body, presence: true
 end

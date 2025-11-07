@@ -1,5 +1,9 @@
 class ApplicationController < ActionController::API
+  # always try to set current user from token first
   before_action :set_current_user_from_token
+
+  # enforce authentication by default (controllers/actions can skip)
+  before_action :authenticate_request!
 
   private
 
@@ -13,10 +17,6 @@ class ApplicationController < ActionController::API
   end
 
   def authenticate_request!
-    render json: { error: "Unauthorized" }, status: :unauthorized unless @current_user
-  end
-
-  def current_user
-    @current_user
+    render json: { error: "Not Authorized" }, status: :unauthorized unless @current_user
   end
 end

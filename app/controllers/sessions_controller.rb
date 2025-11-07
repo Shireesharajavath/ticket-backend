@@ -1,16 +1,27 @@
 class SessionsController < ApplicationController
+  # Skip authentication for login (create) and logout (destroy)
+  skip_before_action :authenticate_request!, only: [:create]
+  before_action :authenticate_request!, only: [:destroy]
+  # POST /login
   def create
-    user = User.find_by(username: params[:user][:email]) || User.find_by(email: params[:user][:email])
+    user = User.find_by(email: params[:email])
 
-    if user && user.authenticate(params[:user][:password])
-      token = JWT.encode({ user_id: user.id }, Rails.application.secret_key_base)
+    if user&.authenticate(params[:password])
+      token = JsonWebToken.encode(user_id: user.id)
       render json: {
         message: "Login successful",
-        user: user,
-        token: token
+        token: token,
+        email: user.email,
+        user_id: user.id
       }, status: :ok
     else
       render json: { error: "Invalid email or password" }, status: :unauthorized
     end
+  end
+
+  # DELETE /logout
+  def destroy
+    # JWT logout is stateless — frontend should just delete the token
+    render json: { message: "Logged out successfully" }, status: :ok
   end
 end

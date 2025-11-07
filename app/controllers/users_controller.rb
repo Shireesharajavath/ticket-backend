@@ -1,49 +1,46 @@
 class UsersController < ApplicationController
-  skip_before_action :set_current_user_from_token, only: [:login, :signup]
+  before_action :authenticate_request!, only: [:show, :update]
+  before_action :set_user, only: [:show, :update]
 
   # POST /signup
-  def signup
+  def create
     user = User.new(user_params)
     if user.save
-      render json: { message: "User created successfully", user: { id: user.id, username: user.username } }, status: :created
+      render json: { message: "User created successfully", user: user }, status: :created
     else
       render json: { errors: user.errors.full_messages }, status: :unprocessable_entity
     end
   end
 
-  # POST /login
-  def login
-    creds = params.require(:user).permit(:username, :password)
-    user = User.find_by(username: creds[:username])
-
-    if user&.authenticate(creds[:password])
-      token = JsonWebToken.encode({ user_id: user.id })
-      render json: { token: token, username: user.username }, status: :ok
+  # GET /users/:id
+  def show
+    if @user == @current_user
+      render json: @user
     else
-      render json: { error: "Invalid username or password" }, status: :unauthorized
+      render json: { error: "Not authorized" }, status: :forbidden
     end
   end
 
-  # GET /me
-  def me
-    # reuse set_current_user_from_token logic; current_user should be present
-    if current_user
-      render json: {
-        user: {
-          id: current_user.id,
-          username: current_user.username,
-          created_at: current_user.created_at,
-          updated_at: current_user.updated_at
-        }
-      }, status: :ok
+  # PATCH/PUT /users/:id
+  def update
+    if @user == @current_user
+      if @user.update(user_params)
+        render json: { message: "User updated successfully", user: @user }
+      else
+        render json: { errors: @user.errors.full_messages }, status: :unprocessable_entity
+      end
     else
-      render json: { error: "Invalid or expired token" }, status: :unauthorized
+      render json: { error: "Not authorized" }, status: :forbidden
     end
   end
 
   private
 
+  def set_user
+    @user = User.find(params[:id])
+  end
+
   def user_params
-    params.require(:user).permit(:username, :password, :password_confirmation)
+    params.require(:user).permit(:email, :password, :password_confirmation)
   end
 end

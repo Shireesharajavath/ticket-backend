@@ -1,146 +1,75 @@
-# app/controllers/tickets_controller.rb
 class TicketsController < ApplicationController
-  before_action :authenticate_request!, except: [:index, :show]
-  before_action :set_ticket, only: [:show, :update, :destroy]
+  before_action :authenticate_request!
+  before_action :set_ticket, only: [:show, :update]
 
-  # ===========================
   # GET /tickets
-  # ===========================
+  # Optional filtering: /tickets?status=Done&priority=High
   def index
-    scope = Ticket.all.includes(:creator, :assignee)
+    tickets = Ticket.all.includes(:creator, :assignee, :comments)
+    tickets = tickets.where(status: params[:status]) if params[:status].present?
+    tickets = tickets.where(priority: params[:priority]) if params[:priority].present?
+    tickets = tickets.where(assignee_id: params[:assignee_id]) if params[:assignee_id].present?
 
-    # ✅ Filter by creator / assignee / status
-    scope = scope.where(creator_id: params[:creator_id]) if params[:creator_id].present?
-    scope = scope.where(assignee_id: params[:assignee_id]) if params[:assignee_id].present?
-    scope = scope.where(status: params[:status]) if params[:status].present?
-
-    # ✅ Handle text search (title, description, status, id, etc.)
-    if params[:search].present? || params[:q].present?
-      term = params[:search] || params[:q]
-      scope = Ticket.search_any(term)
-    end
-
-    tickets = scope.order(updated_at: :desc)
-
-    render json: tickets.as_json(
-      include: {
-        creator: { only: [:id, :username] },
-        assignee: { only: [:id, :username] }
-      }
-    )
+    render json: tickets.to_json(include: [:creator, :assignee, :comments])
   end
 
-  # ===========================
+  # GET /tickets/:id
+  def show
+    render json: @ticket.to_json(include: [:creator, :assignee, :comments])
+  end
+
   # POST /tickets
-  # ===========================
   def create
     ticket = Ticket.new(ticket_params)
-    ticket.creator = current_user
+    ticket.creator_id = @current_user.id
+    ticket.status ||= "Pending"
 
     if ticket.save
-      render json: ticket, status: :created
+      render json: { message: "Ticket created successfully", ticket: ticket }, status: :created
     else
       render json: { errors: ticket.errors.full_messages }, status: :unprocessable_entity
     end
   end
 
-  # ===========================
-  # GET /tickets/:id
-  # ===========================
-  def show
-    render json: @ticket.as_json(
-      include: {
-        comments: { include: { user: { only: [:id, :username] } } },
-        creator: { only: [:id, :username] },
-        assignee: { only: [:id, :username] }
-      }
-    )
-  end
-
-  # ===========================
-  # PUT/PATCH /tickets/:id
-  # ===========================
+  # PATCH/PUT /tickets/:id
   def update
-    return render json: { error: "Ticket is read-only" }, status: :forbidden if @ticket.read_only
-
-    if editing_title_or_description?
-      unless current_user.id == @ticket.creator_id
-        return render json: { error: "Only creator can edit title/description" }, status: :forbidden
+    # Only creator or assignee can update
+    if @ticket.creator_id == @current_user.id || @ticket.assignee_id == @current_user.id
+      if @ticket.update(ticket_params)
+        render json: { message: "Ticket updated successfully", ticket: @ticket }
+      else
+        render json: { errors: @ticket.errors.full_messages }, status: :unprocessable_entity
       end
-    end
-
-    if changing_status_or_assignee?
-      unless [@ticket.creator_id, @ticket.assignee_id].compact.include?(current_user.id)
-        return render json: { error: "Only creator or assignee can change status/assignee" }, status: :forbidden
-      end
-    end
-
-    old_values = {
-      title: @ticket.title,
-      description: @ticket.description,
-      status: @ticket.status,
-      assignee_id: @ticket.assignee_id
-    }
-
-    if @ticket.update(ticket_params)
-      handle_status_transitions(old_values, @ticket)
-      log_change_comments(old_values, @ticket)
-      render json: @ticket, status: :ok
     else
-      render json: { errors: @ticket.errors.full_messages }, status: :unprocessable_entity
+      render json: { error: "Not authorized to update this ticket" }, status: :forbidden
     end
   end
 
-  # ===========================
-  # DELETE /tickets/:id
-  # ===========================
-  def destroy
-    if current_user.id == @ticket.creator_id
-      @ticket.destroy
-      render json: { message: "Ticket deleted successfully" }, status: :ok
+  # GET /my/created
+  def created_by_me
+    tickets = Ticket.where(creator_id: @current_user.id).includes(:creator, :assignee, :comments)
+    render json: tickets.to_json(include: [:creator, :assignee, :comments])
+  end
+
+  # GET /my/assigned
+  def assigned_to_me
+    tickets = Ticket.where(assignee_id: @current_user.id).includes(:creator, :assignee, :comments)
+    render json: tickets.to_json(include: [:creator, :assignee, :comments])
+  end
+
+  # GET /tickets/search?query=...
+  def search
+    query = params[:query]
+    if query.present?
+      tickets = Ticket.includes(:creator, :assignee, :comments).where(
+        "LOWER(title) LIKE :q OR LOWER(description) LIKE :q OR LOWER(status) LIKE :q OR LOWER(priority) LIKE :q",
+        q: "%#{query.downcase}%"
+      )
+      render json: tickets.to_json(include: [:creator, :assignee, :comments])
     else
-      render json: { error: "Only creator can delete this ticket" }, status: :forbidden
+      render json: { error: "Please provide a search query" }, status: :bad_request
     end
   end
-
-  # ===========================
-# GET /my/created
-# ===========================
-def created_by_me
-  tickets = Ticket.where(creator_id: current_user.id).includes(:assignee)
-
-  # 🔍 Optional search term filter
-  if params[:q].present?
-    query = "%#{params[:q]}%"
-    tickets = tickets.where("title ILIKE ? OR description ILIKE ? OR id::text ILIKE ? OR status ILIKE ?", query, query, query, query)
-  end
-
-  # ✅ Optional status filter
-  tickets = tickets.where(status: params[:status]) if params[:status].present?
-
-  render json: tickets.order(updated_at: :desc).as_json(
-    include: { assignee: { only: [:id, :username] } }
-  )
-end
-
-# ===========================
-# GET /my/assigned
-# ===========================
-def assigned_to_me
-  tickets = Ticket.where(assignee_id: current_user.id).includes(:creator)
-
-  if params[:q].present?
-    query = "%#{params[:q]}%"
-    tickets = tickets.where("title ILIKE ? OR description ILIKE ? OR id::text ILIKE ? OR status ILIKE ?", query, query, query, query)
-  end
-
-  tickets = tickets.where(status: params[:status]) if params[:status].present?
-
-  render json: tickets.order(updated_at: :desc).as_json(
-    include: { creator: { only: [:id, :username] } }
-  )
-end
-
 
   private
 
@@ -151,42 +80,6 @@ end
   end
 
   def ticket_params
-    params.permit(:title, :description, :status, :assignee_id)
-  end
-
-  def editing_title_or_description?
-    params[:title].present? || params[:description].present?
-  end
-
-  def changing_status_or_assignee?
-    params[:status].present? || params[:assignee_id].present?
-  end
-
-  def handle_status_transitions(old, ticket)
-    if old[:status] != ticket.status
-      case ticket.status.downcase
-      when "ready"
-        ticket.update(assignee_id: ticket.creator_id)
-      when "done"
-        ticket.update(read_only: true)
-      end
-    end
-  end
-
-  def log_change_comments(old, ticket)
-    if old[:title] != ticket.title
-      ticket.comments.create!(user: current_user, body: "Title changed from '#{old[:title]}' to '#{ticket.title}'", system_generated: true)
-    end
-    if old[:description] != ticket.description
-      ticket.comments.create!(user: current_user, body: "Description changed", system_generated: true)
-    end
-    if old[:status] != ticket.status
-      ticket.comments.create!(user: current_user, body: "Status changed from '#{old[:status]}' to '#{ticket.status}'", system_generated: true)
-    end
-    if old[:assignee_id] != ticket.assignee_id
-      old_name = User.find_by(id: old[:assignee_id])&.username || "Unassigned"
-      new_name = User.find_by(id: ticket.assignee_id)&.username || "Unassigned"
-      ticket.comments.create!(user: current_user, body: "Assignee changed from '#{old_name}' to '#{new_name}'", system_generated: true)
-    end
+    params.require(:ticket).permit(:title, :description, :status, :priority, :assignee_id,:creator_id)
   end
 end
