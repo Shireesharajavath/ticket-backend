@@ -7,10 +7,7 @@ Rails.application.routes.draw do
   get "/tickets/search", to: "tickets#search"
 
   get "/users/:id", to: "users#show"
-  patch "/users/:id", to: "users#update"
-
-  # Optional: you can also allow PUT if needed
-  put "/users/:id", to: "users#update"
+   put "/users/:id", to: "users#update"
   # === Ticket Routes ===
   resources :tickets, except: [:destroy] do
     # Nested comments routes (each ticket has many comments)
