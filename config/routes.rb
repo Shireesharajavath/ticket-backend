@@ -1,20 +1,20 @@
 Rails.application.routes.draw do
   # === Authentication Routes ===
-  post "/signup", to: "users#create"      # Signup (register a new user)
-  post "/login", to: "sessions#create"    # Login (generate JWT token)
-  delete "/logout", to: "sessions#destroy"
+  post "/signup", to: "users#create"      # Signup
+  post "/login", to: "sessions#create"    # Login
+  delete "/logout", to: "sessions#destroy" # Logout
 
-  get "/tickets/search", to: "tickets#search"
-
-  get "/users/:id", to: "users#show"
-   put "/users/:id", to: "users#update"
   # === Ticket Routes ===
+  get "/tickets/search", to: "tickets#search"
   resources :tickets, except: [:destroy] do
-    # Nested comments routes (each ticket has many comments)
     resources :comments, only: [:index, :create, :update, :destroy]
   end
 
+  # === User Routes ===
+  get "/users/:id", to: "users#show"
+  put "/users/:id", to: "users#update"
+
   # === Convenience routes ===
-  get "/my/created", to: "tickets#created_by_me"     # Tickets created by logged-in user
-  get "/my/assigned", to: "tickets#assigned_to_me"   # Tickets assigned to logged-in user
+  get "/my/created", to: "tickets#created_by_me"
+  get "/my/assigned", to: "tickets#assigned_to_me"
 end

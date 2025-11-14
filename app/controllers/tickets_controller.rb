@@ -1,6 +1,7 @@
 class TicketsController < ApplicationController
   before_action :authenticate_request!
   before_action :set_ticket, only: [:show, :update]
+  before_action :authorize_ticket_update, only: [:update]
 
   # GET /tickets
   # Optional filtering: /tickets?status=Done&priority=High
@@ -20,8 +21,7 @@ class TicketsController < ApplicationController
 
   # POST /tickets
   def create
-    ticket = Ticket.new(ticket_params)
-    ticket.creator_id = @current_user.id
+    ticket = @current_user.created_tickets.new(ticket_params)
     ticket.status ||= "Pending"
 
     if ticket.save
@@ -33,15 +33,10 @@ class TicketsController < ApplicationController
 
   # PATCH/PUT /tickets/:id
   def update
-    # Only creator or assignee can update
-    if @ticket.creator_id == @current_user.id || @ticket.assignee_id == @current_user.id
-      if @ticket.update(ticket_params)
-        render json: { message: "Ticket updated successfully", ticket: @ticket }
-      else
-        render json: { errors: @ticket.errors.full_messages }, status: :unprocessable_entity
-      end
+    if @ticket.update(ticket_params)
+      render json: { message: "Ticket updated successfully", ticket: @ticket }
     else
-      render json: { error: "Not authorized to update this ticket" }, status: :forbidden
+      render json: { errors: @ticket.errors.full_messages }, status: :unprocessable_entity
     end
   end
 
@@ -73,6 +68,8 @@ class TicketsController < ApplicationController
 
   private
 
+  # --- Shared Methods ---
+
   def set_ticket
     @ticket = Ticket.find(params[:id])
   rescue ActiveRecord::RecordNotFound
@@ -80,6 +77,31 @@ class TicketsController < ApplicationController
   end
 
   def ticket_params
-    params.require(:ticket).permit(:title, :description, :status, :priority, :assignee_id,:creator_id)
+    params.require(:ticket).permit(:title, :description, :status, :priority, :assignee_id)
+  end
+
+  # --- 🚦 Business Rules Section ---
+  def authorize_ticket_update
+    # 🚫 Rule 5: Once Done → read-only
+    if @ticket.status == "Done"
+      render json: { error: "Ticket is read-only (Done)." }, status: :forbidden and return
+    end
+
+    # 🧩 Rule 1: Title/description → only creator
+    if (params[:ticket][:title].present? || params[:ticket][:description].present?) &&
+       @ticket.creator_id != @current_user.id
+      render json: { error: "Only the creator can edit title/description." }, status: :forbidden and return
+    end
+
+    # 🧩 Rule 2: Status/assignee → only creator or current assignee
+    if (params[:ticket][:status].present? || params[:ticket][:assignee_id].present?) &&
+       ![@ticket.creator_id, @ticket.assignee_id].include?(@current_user.id)
+      render json: { error: "Only the creator or assignee can change status/assignee." }, status: :forbidden and return
+    end
+
+    # ⚙️ Rule 3: When status changes to Ready → auto assign to creator
+    if params[:ticket][:status] == "Ready"
+      @ticket.assignee_id = @ticket.creator_id
+    end
   end
 end
