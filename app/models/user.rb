@@ -6,6 +6,9 @@ class User < ApplicationRecord
   has_many :assigned_tickets, class_name: "Ticket", foreign_key: "assignee_id"
   has_many :comments, dependent: :destroy
 
+  # NEW: link UserTokens
+  has_many :user_tokens, dependent: :destroy
+
   # Validations
   validates :email, presence: true, uniqueness: true
   validates :password, presence: true, length: { minimum: 8 }, if: -> { new_record? || !password.nil? }
