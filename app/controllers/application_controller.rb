@@ -9,7 +9,7 @@ class ApplicationController < ActionController::API
 
     decoded = JsonWebToken.decode(token)
     return render json: { error: "Invalid token" }, status: :unauthorized unless decoded
-
+   
     # Check if token is revoked
     user_token = UserToken.find_by(token: token)
     if user_token&.revoked
