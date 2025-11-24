@@ -13,6 +13,8 @@ Rails.application.routes.draw do
   # === User Routes ===
   get "/users/:id", to: "users#show"
   put "/users/:id", to: "users#update"
+  get '/current_user', to: 'users#me'
+
 
   # === Convenience routes ===
   get "/my/created", to: "tickets#created_by_me"

@@ -9,7 +9,7 @@ class ApplicationController < ActionController::API
 
     decoded = JsonWebToken.decode(token)
     return render json: { error: "Invalid token" }, status: :unauthorized unless decoded
-   
+
     # Check if token is revoked
     user_token = UserToken.find_by(token: token)
     if user_token&.revoked
@@ -17,7 +17,7 @@ class ApplicationController < ActionController::API
     end
 
     @current_user = User.find_by(id: decoded[:user_id])
-    render json: { error: "User not found" }, status: :unauthorized unless @current_user
+    return render json: { error: "User not found" }, status: :unauthorized unless @current_user
   end
 
   def get_token_from_header
